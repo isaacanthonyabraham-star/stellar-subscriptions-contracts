@@ -42,6 +42,26 @@ fn cap_charge_exactly_reaching_total_cap_sets_exhausted() {
 }
 
 #[test]
+fn cap_equal_to_one_period_exhausts_and_releases_allowance() {
+    let s = Setup::new();
+    let id = s.subscribe_with(AMOUNT, INTERVAL, AMOUNT);
+
+    s.client.charge(&s.merchant, &id);
+
+    let sub = s.sub(id);
+    assert_eq!(sub.status, SubStatus::Exhausted);
+    assert_eq!(s.client.remaining_cap(&id), 0);
+    assert!(!s.client.is_chargeable(&id));
+    assert_eq!(s.allowance(), 0);
+
+    s.advance(INTERVAL);
+    expect_err(
+        s.client.try_charge(&s.merchant, &id),
+        Error::SubscriptionExhausted,
+    );
+}
+
+#[test]
 fn cap_bounds_total_charged_over_the_whole_lifecycle() {
     let s = Setup::new();
     let id = s.subscribe();
@@ -74,4 +94,26 @@ fn cap_uses_checked_arithmetic_on_total_charged() {
     let before = s.snapshot(id);
     expect_err(s.client.try_charge(&s.merchant, &id), Error::Overflow);
     assert_eq!(s.snapshot(id), before);
+}
+
+#[test]
+fn cap_at_i128_max_exhausts_without_overflow() {
+    let s = Setup::new();
+    let amount = i128::MAX;
+    s.token.burn(&s.subscriber, &START_BALANCE);
+    s.mint(&s.subscriber, amount);
+    let id = s.subscribe_with(amount, INTERVAL, amount);
+
+    s.client.charge(&s.merchant, &id);
+
+    let sub = s.sub(id);
+    assert_eq!(sub.total_charged, sub.total_cap);
+    assert_eq!(sub.total_cap, i128::MAX);
+    assert_eq!(sub.status, SubStatus::Exhausted);
+
+    s.advance(INTERVAL);
+    expect_err(
+        s.client.try_charge(&s.merchant, &id),
+        Error::SubscriptionExhausted,
+    );
 }
